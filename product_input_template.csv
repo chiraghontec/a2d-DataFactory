@@ -1,4 +1,4 @@
-Part Number / Model,Description / Text Details,Quantity / Bin,Source
-MSP EXP 432 P401,Development Kit,RL6,Texas Instruments
-CC31XXEMUBOOST,Wireless Emulation Board,,Texas Instruments
-ESP32-WROOM,WiFi/Bluetooth Module,50,Espressif
+product_name,price,bin_location,initial_stock
+MSP EXP 432 P401,2500,RL6,10
+CC31XXEMUBOOST,1200,RB12,5
+ESP32-WROOM-32,350,RB10,100

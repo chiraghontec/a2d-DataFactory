@@ -26,14 +26,32 @@ def package_bundle(input_csv, image_dir, output_zip):
     # Create output directory
     os.makedirs(os.path.dirname(output_zip), exist_ok=True)
     
-    # Read CSV to count products
+    # Read CSV and select required columns
     df = pd.read_csv(input_csv)
+    
+    # Ensure all required columns are present in the final CSV
+    required_columns = [
+        'sku', 'product_name', 'price', 'initial_stock', 'bin_location',
+        'seo_title', 'meta_description', 'long_description_html', 
+        'specs_json', 'image_filename'
+    ]
+    
+    # Filter to only include required columns that exist
+    available_columns = [col for col in required_columns if col in df.columns]
+    df_final = df[available_columns]
+    
+    # Create temporary CSV with final structure
+    import tempfile
+    temp_csv = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv')
+    df_final.to_csv(temp_csv.name, index=False)
+    temp_csv.close()
     
     # Create zip file
     with ZipFile(output_zip, 'w') as zipf:
         # Add CSV as Master_Inventory_ready.csv
-        zipf.write(input_csv, 'Master_Inventory_ready.csv')
-        print(f"  ✓ Added CSV: Master_Inventory_ready.csv")
+        zipf.write(temp_csv.name, 'Master_Inventory_ready.csv')
+        print(f"  ✓ Added CSV: Master_Inventory_ready.csv ({len(df_final)} products)")
+        print(f"  ✓ Columns: {', '.join(available_columns)}")
         
         # Add all images
         if os.path.exists(image_dir):
@@ -45,12 +63,15 @@ def package_bundle(input_csv, image_dir, output_zip):
                     image_count += 1
             print(f"  ✓ Added {image_count} images")
     
+    # Clean up temp file
+    os.unlink(temp_csv.name)
+    
     # Get file size
     size_mb = os.path.getsize(output_zip) / (1024 * 1024)
     
     print(f"\n✅ Step 4 Complete!")
     print(f"📦 Bundle created: {output_zip}")
-    print(f"📊 Contains: {len(df)} products")
+    print(f"📊 Contains: {len(df_final)} products")
     print(f"💾 File size: {size_mb:.2f} MB")
     print(f"\n🎉 PIPELINE COMPLETE! Ready to import.")
     
