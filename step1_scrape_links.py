@@ -119,8 +119,11 @@ def scrape_links(input_csv, output_csv):
         sku = generate_sku(product_name)
         df.at[index, 'sku'] = sku
         
-        # Search for datasheet using product_name
+        # Search for datasheet using product_name with fallback
         ds_link = google_search(f"{clean_search_term(product_name)} datasheet")
+        if not ds_link:
+            # Fallback: try with "product photo" keyword
+            ds_link = google_search(f"{clean_search_term(product_name)} specifications")
         df.at[index, 'Datasheet_Links'] = ds_link if ds_link else "Not Found"
         
         # Search for product photo

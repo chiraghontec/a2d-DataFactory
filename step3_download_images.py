@@ -43,12 +43,31 @@ def download_image(row_data, image_dir):
         return index, None
 
     try:
-        # Use SKU for filename
-        filename = f"{sku}.jpg"
-        save_path = os.path.join(image_dir, filename)
-        
         response = requests.get(url, headers=HEADERS, timeout=15, stream=True)
         response.raise_for_status()
+        
+        # Detect file extension from URL or content-type
+        parsed_url = urlparse(url)
+        path = parsed_url.path
+        ext = os.path.splitext(path)[1]
+        
+        if not ext or len(ext) > 5:
+            # Try to get extension from content-type
+            content_type = response.headers.get('Content-Type', '').lower()
+            if 'jpeg' in content_type or 'jpg' in content_type:
+                ext = '.jpg'
+            elif 'png' in content_type:
+                ext = '.png'
+            elif 'gif' in content_type:
+                ext = '.gif'
+            elif 'webp' in content_type:
+                ext = '.webp'
+            else:
+                ext = '.jpg'  # Default to jpg
+        
+        # Use SKU for filename
+        filename = f"{sku}{ext}"
+        save_path = os.path.join(image_dir, filename)
 
         with open(save_path, 'wb') as f:
             for chunk in response.iter_content(chunk_size=8192):
