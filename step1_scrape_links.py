@@ -45,19 +45,25 @@ def clean_search_term(text):
     
     return text.strip()
 
-def google_search(query, search_type=None):
-    """Performs the search and returns the first link found."""
+def google_search(query, search_type=None, num_results=1):
+    """Performs the search and returns the requested number of links."""
     try:
         service = build("customsearch", "v1", developerKey=API_KEY)
         res = service.cse().list(
             q=query,
             cx=CSE_ID,
             searchType=search_type,
-            num=1
+            num=min(num_results, 10)  # API max is 10
         ).execute()
-        return res['items'][0]['link'] if 'items' in res else None
+        
+        if 'items' in res:
+            if num_results == 1:
+                return res['items'][0]['link']
+            else:
+                return [item['link'] for item in res['items'][:num_results]]
+        return None if num_results == 1 else []
     except Exception as e:
-        return None
+        return None if num_results == 1 else []
 
 def smart_search_with_fallback(item, context):
     """Tries multiple search strategies until a result is found."""
@@ -126,9 +132,13 @@ def scrape_links(input_csv, output_csv):
             ds_link = google_search(f"{clean_search_term(product_name)} specifications")
         df.at[index, 'Datasheet_Links'] = ds_link if ds_link else "Not Found"
         
-        # Search for product photo
-        img_link = google_search(f"{clean_search_term(product_name)} product photo", search_type="image")
-        df.at[index, 'Image_Links'] = img_link if img_link else "Not Found"
+        # Search for 3 product photos
+        img_links = google_search(f"{clean_search_term(product_name)} product photo", search_type="image", num_results=3)
+        # Join multiple links with | separator
+        if img_links and len(img_links) > 0:
+            df.at[index, 'Image_Links'] = " | ".join(img_links)
+        else:
+            df.at[index, 'Image_Links'] = "Not Found"
         
         time.sleep(0.5)  # Rate limiting
     

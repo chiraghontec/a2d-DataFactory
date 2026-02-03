@@ -35,48 +35,58 @@ def extract_url(image_link_str):
     return None
 
 def download_image(row_data, image_dir):
-    """Downloads image for a single row."""
+    """Downloads up to 3 images for a single product."""
     index, sku, image_link_raw = row_data
     
-    url = extract_url(image_link_raw)
-    if not url or "not found" in str(url).lower():
-        return index, None
+    # Handle multiple image URLs separated by |
+    if pd.isna(image_link_raw) or "not found" in str(image_link_raw).lower():
+        return index, []
+    
+    # Split by pipe separator to get multiple URLs
+    urls = [url.strip() for url in str(image_link_raw).split('|')]
+    downloaded_files = []
+    
+    for img_idx, url_raw in enumerate(urls[:3], 1):  # Limit to 3 images
+        url = extract_url(url_raw)
+        if not url:
+            continue
+            
+        try:
+            response = requests.get(url, headers=HEADERS, timeout=15, stream=True)
+            response.raise_for_status()
+            
+            # Detect file extension
+            parsed_url = urlparse(url)
+            path = parsed_url.path
+            ext = os.path.splitext(path)[1]
+            
+            if not ext or len(ext) > 5:
+                content_type = response.headers.get('Content-Type', '').lower()
+                if 'jpeg' in content_type or 'jpg' in content_type:
+                    ext = '.jpg'
+                elif 'png' in content_type:
+                    ext = '.png'
+                elif 'gif' in content_type:
+                    ext = '.gif'
+                elif 'webp' in content_type:
+                    ext = '.webp'
+                else:
+                    ext = '.jpg'
+            
+            # Use SKU with image number for filename
+            filename = f"{sku}_{img_idx}{ext}"
+            save_path = os.path.join(image_dir, filename)
 
-    try:
-        response = requests.get(url, headers=HEADERS, timeout=15, stream=True)
-        response.raise_for_status()
-        
-        # Detect file extension from URL or content-type
-        parsed_url = urlparse(url)
-        path = parsed_url.path
-        ext = os.path.splitext(path)[1]
-        
-        if not ext or len(ext) > 5:
-            # Try to get extension from content-type
-            content_type = response.headers.get('Content-Type', '').lower()
-            if 'jpeg' in content_type or 'jpg' in content_type:
-                ext = '.jpg'
-            elif 'png' in content_type:
-                ext = '.png'
-            elif 'gif' in content_type:
-                ext = '.gif'
-            elif 'webp' in content_type:
-                ext = '.webp'
-            else:
-                ext = '.jpg'  # Default to jpg
-        
-        # Use SKU for filename
-        filename = f"{sku}{ext}"
-        save_path = os.path.join(image_dir, filename)
+            with open(save_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            
+            downloaded_files.append(filename)
 
-        with open(save_path, 'wb') as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                f.write(chunk)
-                
-        return index, filename
-
-    except Exception as e:
-        return index, None
+        except Exception as e:
+            continue  # Skip failed images
+    
+    return index, downloaded_files
 
 def download_images_from_csv(input_csv, output_csv, image_dir):
     """Main function to download images."""
@@ -116,15 +126,24 @@ def download_images_from_csv(input_csv, output_csv, image_dir):
             idx, filename = future.result()
             results[idx] = filename
     
-    # Update DataFrame
-    df['image_filename'] = df.index.map(results)
+    # Update DataFrame with multiple image columns
+    for idx in range(len(df)):
+        filenames = results.get(idx, [])
+        for i in range(3):
+            col_name = f'image_filename_{i+1}'
+            if col_name not in df.columns:
+                df[col_name] = None
+            if i < len(filenames):
+                df.at[idx, col_name] = filenames[i]
     
     # Save output
     print(f"💾 Saving to: {output_csv}")
     df.to_csv(output_csv, index=False)
     
-    success_count = df['image_filename'].notna().sum()
-    print(f"✅ Step 3 Complete! Downloaded {success_count}/{len(df)} images")
+    # Count successful downloads
+    success_count = sum(1 for v in results.values() if v and len(v) > 0)
+    total_images = sum(len(v) for v in results.values() if v)
+    print(f"✅ Step 3 Complete! Downloaded {total_images} images for {success_count}/{len(df)} products")
     
     return True
 

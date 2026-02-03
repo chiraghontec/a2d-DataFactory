@@ -40,20 +40,27 @@ def extract_text_from_url(url):
         
         # Handle PDFs
         if ".pdf" in url.lower() or "pdf" in content_type:
-            with pdfplumber.open(BytesIO(response.content)) as pdf:
-                all_text = []
-                for i, page in enumerate(pdf.pages[:10]):
-                    try:
-                        text = page.extract_text()
-                        if text and len(text.strip()) > 50:
-                            all_text.append(text)
-                    except:
-                        continue
-                
-                full_text = "\n\n".join(all_text)
-                if full_text:
-                    words = full_text.split()[:5000]
-                    return " ".join(words)
+            try:
+                # Use 'strict_metadata=False' to ignore minor font errors
+                with pdfplumber.open(BytesIO(response.content)) as pdf:
+                    all_text = []
+                    for i, page in enumerate(pdf.pages[:10]):
+                        try:
+                            # layout=False is faster and less prone to BBox errors
+                            text = page.extract_text(layout=False)
+                            if text and len(text.strip()) > 50:
+                                all_text.append(text)
+                        except Exception as e:
+                            # If a specific page fails, just skip it instead of crashing
+                            continue
+                    
+                    full_text = "\n\n".join(all_text)
+                    if full_text:
+                        words = full_text.split()[:5000]
+                        return " ".join(words)
+                    return None
+            except Exception as e:
+                # If pdfplumber fails entirely (e.g. encrypted PDF), return None gracefully
                 return None
         
         # Handle HTML

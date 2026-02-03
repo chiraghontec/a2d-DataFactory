@@ -6,7 +6,7 @@ Complete automated pipeline for processing product data from simple input to imp
 
 This pipeline transforms a simple CSV with part numbers into a complete product import bundle with:
 - ✅ Datasheet links (from Google Search)
-- ✅ Product images (downloaded locally)
+- ✅ **3 product images per item** (downloaded locally)
 - ✅ AI-generated SEO descriptions
 - ✅ Technical specifications (JSON format)
 - ✅ Ready-to-import zip bundle
@@ -106,8 +106,8 @@ python step4_package_bundle.py
 
 ### Step 1: Scrape Links (2-5 min for 50 products)
 - Searches Google for datasheets using multiple strategies
-- Finds product images
-- Adds `Datasheet_Links` and `Image_Links` columns
+- Finds **3 product images per item**
+- Adds `Datasheet_Links` and `Image_Links` columns (pipe-separated URLs)
 - **Output:** `temp/stage1_with_links.csv`
 
 ### Step 2: Generate SEO (10-20 min for 50 products)
@@ -118,9 +118,9 @@ python step4_package_bundle.py
 - **Output:** `temp/stage2_with_seo.csv`
 
 ### Step 3: Download Images (1-3 min for 50 products)
-- Downloads all product images in parallel
-- Saves with sanitized filenames
-- Adds `image_filename` column
+- Downloads **all 3 product images** in parallel (up to 10 workers)
+- Saves as `{SKU}_1.jpg`, `{SKU}_2.jpg`, `{SKU}_3.jpg`
+- Adds `image_filename_1`, `image_filename_2`, `image_filename_3` columns
 - **Output:** `temp/stage3_final.csv` + `output/images/`
 
 ### Step 4: Package Bundle (< 1 min)
