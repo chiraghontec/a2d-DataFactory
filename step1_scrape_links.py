@@ -7,6 +7,7 @@ import pandas as pd
 import os
 import time
 import re
+import random
 from googleapiclient.discovery import build
 from dotenv import load_dotenv
 from tqdm import tqdm
@@ -17,6 +18,14 @@ load_dotenv()
 # Configuration
 API_KEY = os.getenv("GOOGLE_API_KEY")
 CSE_ID = os.getenv("CUSTOM_SEARCH_ENGINE_ID")
+
+def generate_sku(product_name):
+    """Generate SKU from product name with random 4-digit suffix."""
+    # Convert to uppercase and replace spaces with hyphens
+    slug = re.sub(r'[^a-zA-Z0-9]+', '-', str(product_name).upper()).strip('-')
+    # Generate random 4-digit suffix
+    suffix = random.randint(1000, 9999)
+    return f"{slug}-{suffix}"
 
 def clean_search_term(text):
     """Clean the text to remove noise that confuses Google."""
@@ -91,6 +100,7 @@ def scrape_links(input_csv, output_csv):
     df = pd.read_csv(input_csv)
     
     # Initialize new columns
+    df['sku'] = ""
     df['Datasheet_Links'] = ""
     df['Image_Links'] = ""
     
@@ -100,18 +110,21 @@ def scrape_links(input_csv, output_csv):
     for index in tqdm(range(len(df)), desc="Scraping"):
         row = df.iloc[index]
         
-        part_number = str(row.get('Part Number / Model', '')).strip()
-        description = str(row.get('Description / Text Details', '')).strip()
+        product_name = str(row.get('product_name', '')).strip()
         
-        if not part_number or part_number == 'nan' or len(part_number) < 2:
+        if not product_name or product_name == 'nan' or len(product_name) < 2:
             continue
         
-        # Search for datasheet
-        ds_link = smart_search_with_fallback(part_number, description)
-        df.at[index, 'Datasheet_Links'] = ds_link
+        # Generate SKU
+        sku = generate_sku(product_name)
+        df.at[index, 'sku'] = sku
         
-        # Search for image
-        img_link = google_search(f"{clean_search_term(part_number)} product photo", search_type="image")
+        # Search for datasheet using product_name
+        ds_link = google_search(f"{clean_search_term(product_name)} datasheet")
+        df.at[index, 'Datasheet_Links'] = ds_link if ds_link else "Not Found"
+        
+        # Search for product photo
+        img_link = google_search(f"{clean_search_term(product_name)} product photo", search_type="image")
         df.at[index, 'Image_Links'] = img_link if img_link else "Not Found"
         
         time.sleep(0.5)  # Rate limiting

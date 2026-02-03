@@ -36,21 +36,15 @@ def extract_url(image_link_str):
 
 def download_image(row_data, image_dir):
     """Downloads image for a single row."""
-    index, part_number, image_link_raw = row_data
+    index, sku, image_link_raw = row_data
     
     url = extract_url(image_link_raw)
     if not url or "not found" in str(url).lower():
         return index, None
 
     try:
-        parsed_url = urlparse(url)
-        path = parsed_url.path
-        ext = os.path.splitext(path)[1]
-        if not ext or len(ext) > 5:
-            ext = '.jpg'
-        
-        safe_name = sanitize_filename(part_number)
-        filename = f"{safe_name}{ext}"
+        # Use SKU for filename
+        filename = f"{sku}.jpg"
         save_path = os.path.join(image_dir, filename)
         
         response = requests.get(url, headers=HEADERS, timeout=15, stream=True)
@@ -82,17 +76,17 @@ def download_images_from_csv(input_csv, output_csv, image_dir):
     df = pd.read_csv(input_csv)
     
     # Find the right columns
-    part_col = 'Part Number / Model'
+    sku_col = 'sku'
     img_col = 'Image_Links'
     
-    if part_col not in df.columns or img_col not in df.columns:
+    if sku_col not in df.columns or img_col not in df.columns:
         print(f"❌ Error: Required columns not found")
         return False
     
     print(f"📥 Downloading images for {len(df)} products...")
     
     # Prepare tasks
-    tasks = [(idx, row[part_col], row[img_col]) for idx, row in df.iterrows()]
+    tasks = [(idx, row[sku_col], row[img_col]) for idx, row in df.iterrows()]
     results = {}
     
     # Multithreaded download

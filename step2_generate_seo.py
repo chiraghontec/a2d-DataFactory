@@ -70,35 +70,29 @@ def extract_text_from_url(url):
     except Exception as e:
         return None
 
-def generate_seo_content(part_number, datasheet_text):
+def generate_seo_content(product_name, datasheet_text):
     """Generate SEO description and specifications using Ollama."""
     
     if not datasheet_text or len(datasheet_text.strip()) < 100:
-        datasheet_text = f"Limited datasheet information for {part_number}."
+        datasheet_text = f"Limited datasheet information for {product_name}."
     
     prompt = f"""Create a structured JSON response for this electronics component.
 
-Part Number: {part_number}
+Product Name: {product_name}
 
 Datasheet Content:
 {datasheet_text[:4000]}
 
-Return ONLY valid JSON with this structure:
+Return ONLY valid JSON with this EXACT structure:
 {{
-  "seo_description": "Professional 120-150 word product description highlighting features, applications, and specifications",
-  "technical_specifications": {{
-    "Part Number": "{part_number}",
-    "Manufacturer": "manufacturer name",
-    "Product Type": "category",
-    "Operating Voltage": "value with unit",
-    "Package Type": "package name",
-    "Operating Temperature": "range with unit",
-    "Key Features": ["feature 1", "feature 2"],
-    "Applications": ["application 1", "application 2"]
-  }}
+  "seo_title": "SEO Title (Max 60 chars)",
+  "meta_description": "SEO Meta Description (Max 160 chars)",
+  "short_description": "1 paragraph summary",
+  "long_description_html": "HTML formatted details with <ul> for features",
+  "technical_specifications": {{ "key": "value" }}
 }}
 
-Use actual values from the datasheet. If a field is not available, omit it."""
+Use actual values from the datasheet. If a field is not available, use a reasonable default."""
 
     try:
         response = ollama.generate(
@@ -124,15 +118,18 @@ Use actual values from the datasheet. If a field is not available, omit it."""
             else:
                 return None
         
-        specs_formatted = json.dumps(data.get('technical_specifications', {}), indent=2)
+        specs_json = json.dumps(data.get('technical_specifications', {}), indent=2)
         
         return {
-            'seo_description': data.get('seo_description', 'Product information available'),
-            'technical_specifications': specs_formatted
+            'seo_title': data.get('seo_title', product_name)[:60],
+            'meta_description': data.get('meta_description', 'Product information available')[:160],
+            'short_description': data.get('short_description', ''),
+            'long_description_html': data.get('long_description_html', ''),
+            'specs_json': specs_json
         }
     
     except Exception as e:
-        print(f"❌ Error generating SEO for {part_number}: {e}")
+        print(f"❌ Error generating SEO for {product_name}: {e}")
         return None
 
 def generate_seo_for_csv(input_csv, output_csv):
@@ -158,26 +155,32 @@ def generate_seo_for_csv(input_csv, output_csv):
     df = pd.read_csv(input_csv)
     
     # Initialize columns
-    df['seo_description'] = ""
-    df['technical_specifications'] = ""
+    df['seo_title'] = ""
+    df['meta_description'] = ""
+    df['short_description'] = ""
+    df['long_description_html'] = ""
+    df['specs_json'] = ""
     
     print(f"🤖 Generating SEO content for {len(df)} products...")
     
     for index in tqdm(range(len(df)), desc="Generating SEO"):
         row = df.iloc[index]
         
-        part_number = str(row.get('Part Number / Model', f'PRODUCT-{index}'))
+        product_name = str(row.get('product_name', f'PRODUCT-{index}'))
         datasheet_url = row.get('Datasheet_Links', '')
         
         # Extract datasheet text
         datasheet_text = extract_text_from_url(datasheet_url)
         
         # Generate SEO content
-        seo_data = generate_seo_content(part_number, datasheet_text)
+        seo_data = generate_seo_content(product_name, datasheet_text)
         
         if seo_data:
-            df.at[index, 'seo_description'] = seo_data['seo_description']
-            df.at[index, 'technical_specifications'] = seo_data['technical_specifications']
+            df.at[index, 'seo_title'] = seo_data['seo_title']
+            df.at[index, 'meta_description'] = seo_data['meta_description']
+            df.at[index, 'short_description'] = seo_data['short_description']
+            df.at[index, 'long_description_html'] = seo_data['long_description_html']
+            df.at[index, 'specs_json'] = seo_data['specs_json']
         
         time.sleep(REQUEST_DELAY)
     
@@ -185,7 +188,7 @@ def generate_seo_for_csv(input_csv, output_csv):
     print(f"💾 Saving to: {output_csv}")
     df.to_csv(output_csv, index=False)
     
-    success_count = df[df['seo_description'] != ''].shape[0]
+    success_count = df[df['seo_title'] != ''].shape[0]
     print(f"✅ Step 2 Complete! Generated SEO for {success_count}/{len(df)} products")
     
     return True
