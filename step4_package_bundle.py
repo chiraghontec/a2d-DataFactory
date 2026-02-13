@@ -33,7 +33,7 @@ def package_bundle(input_csv, image_dir, output_zip):
     required_columns = [
         'sku', 'product_name', 'price', 'initial_stock', 'bin_location',
         'seo_title', 'meta_description', 'long_description_html', 
-        'specs_json', 'image_filename'
+        'specs_json', 'image_filename_1', 'image_filename_2', 'image_filename_3'
     ]
     
     # Filter to only include required columns that exist

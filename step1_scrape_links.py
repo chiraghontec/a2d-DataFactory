@@ -1,6 +1,7 @@
 """
 Step 1: Scrape Datasheet and Image Links
 Reads input CSV and searches Google for datasheets and product images.
+Optimized with domain curation and smart filtering.
 """
 
 import pandas as pd
@@ -8,6 +9,7 @@ import os
 import time
 import re
 import random
+from urllib.parse import urlparse
 from googleapiclient.discovery import build
 from dotenv import load_dotenv
 from tqdm import tqdm
@@ -18,6 +20,79 @@ load_dotenv()
 # Configuration
 API_KEY = os.getenv("GOOGLE_API_KEY")
 CSE_ID = os.getenv("CUSTOM_SEARCH_ENGINE_ID")
+
+# --- SOURCE CURATION ---
+# Known official domains for brands found in the inventory
+OFFICIAL_DOMAINS = {
+    "meanwell": "meanwell.com",
+    "delta": "deltaww.com",
+    "wacom": "wacom.com",
+    "pelco": "pelco.com",
+    "hid": "hidglobal.com",
+    "hikvision": "hikvision.com",
+    "ge": "ge.com",
+    "arduino": "arduino.cc",
+    "xp power": "xppower.com",
+    "tdk": "tdk-lambda.com",
+    "emerson": "emerson.com",
+    "march networks": "marchnetworks.com",
+    "stm": "st.com",
+    "ti": "ti.com",
+    "microchip": "microchip.com",
+    "invensense": "invensense.tdk.com", # for mpu-6050
+    "analog": "analog.com", # for adxl345
+    "espressif": "espressif.com", # for esp32
+    "u-blox": "u-blox.com", # for gps m8n
+    "amphenol": "amphenol.com",
+    "vishay": "vishay.com",
+    "te": "te.com",
+    "renesas": "renesas.com",
+    "omron": "omron.com",
+    "honeywell": "honeywell.com",
+    "nxp": "nxp.com",
+    "onsemi": "onsemi.com",
+    "infineon": "infineon.com",
+    "bosch": "bosch.com",
+    "panasonic": "panasonic.com",
+    "sony": "sony.com",
+    "samsung": "samsung.com",
+    "burr-brown": "ti.com",
+    "national semiconductor": "ti.com",
+    "dallas": "analog.com",
+    "maxim": "analog.com",
+    "intersil": "renesas.com",
+    "fairchild": "onsemi.com",
+    "signetics": "nxp.com",
+    "binder": "binder-connector.com",
+    "positronic": "connectpositronic.com",
+    "raychem": "te.com",
+    "schaffner": "schaffner.com",
+    "exxelia": "exxelia.com",
+    "souriau": "souriau.com", # now Eaton/Souriau-Sunbank
+    "eaton": "eaton.com",
+    "hubersuhner": "hubersuhner.com",
+    "huber+suhner": "hubersuhner.com",
+    "huber suhner": "hubersuhner.com",
+    "apem": "apem.com"
+}
+
+TRUSTED_DISTRIBUTORS = [
+    "mouser.com", "digikey.com", "newark.com", "farnell.com", 
+    "rs-online.com", "arrow.com", "avnet.com", "futureelectronics.com",
+    "adafruit.com", "sparkfun.com", "seeedstudio.com", "robu.in", 
+    "element14.com", "onlinecomponents.com", "masterelectronics.com", "biscoind.com"
+]
+
+ABBREVIATIONS = {
+    r"\(MOT\)": "Motorola",
+    r"\(BB\)": "Burr-Brown",
+    r"\(ADC\)": "Analog Devices",
+    r"\(BEL\)": "Bel Fuse", # or Bharat Electronics, context dependent but likely components
+    r"\(AMI\)": "AMI Semiconductor",
+    r"\(TI\)": "Texas Instruments",
+    r"\(NS\)": "National Semiconductor",
+    r"\(ST\)": "STMicroelectronics"
+}
 
 def generate_sku(product_name):
     """Generate SKU from product name with random 4-digit suffix."""
@@ -31,6 +106,10 @@ def clean_search_term(text):
     """Clean the text to remove noise that confuses Google."""
     text = str(text).replace('nan', '').strip()
     
+    # Expand abbreviations first
+    for abbr, full_name in ABBREVIATIONS.items():
+        text = re.sub(abbr, full_name, text, flags=re.IGNORECASE)
+
     # Remove text inside parentheses if it looks like a person's name or bin code
     # But KEEP valid specs like (12V) or (3.90A)
     def keep_specs(match):
@@ -45,8 +124,42 @@ def clean_search_term(text):
     
     return text.strip()
 
+def get_domain(url):
+    try:
+        parsed = urlparse(url)
+        domain = parsed.netloc
+        if domain.startswith("www."):
+            return domain[4:]
+        return domain
+    except:
+        return ""
+
+def is_official(url, brand_name):
+    domain = get_domain(url)
+    if not domain: return False
+    
+    # Check explicitly mapped domains
+    for brand, official_domain in OFFICIAL_DOMAINS.items():
+        if brand.lower() in brand_name.lower() and official_domain in domain:
+            return True
+            
+    # Heuristic: Check if brand name is part of the domain (e.g. brand "Foobar", domain "foobar.com")
+    # This is risky but useful for unmapped brands.
+    clean_brand = re.sub(r'[^a-zA-Z0-9]', '', brand_name.lower())
+    if len(clean_brand) > 3 and clean_brand in domain.replace(".", ""):
+        return True
+        
+    return False
+
+def is_trusted_distributor(url):
+    domain = get_domain(url)
+    for dist in TRUSTED_DISTRIBUTORS:
+        if dist in domain:
+            return True
+    return False
+
 def google_search(query, search_type=None, num_results=1):
-    """Performs the search and returns the requested number of links."""
+    """Performs the search and returns list of items."""
     try:
         service = build("customsearch", "v1", developerKey=API_KEY)
         res = service.cse().list(
@@ -55,40 +168,58 @@ def google_search(query, search_type=None, num_results=1):
             searchType=search_type,
             num=min(num_results, 10)  # API max is 10
         ).execute()
-        
-        if 'items' in res:
-            if num_results == 1:
-                return res['items'][0]['link']
-            else:
-                return [item['link'] for item in res['items'][:num_results]]
-        return None if num_results == 1 else []
+        return res.get('items', [])
     except Exception as e:
-        return None if num_results == 1 else []
+        print(f"Error searching for {query}: {e}")
+        return []
 
-def smart_search_with_fallback(item, context):
-    """Tries multiple search strategies until a result is found."""
-    clean_item = clean_search_term(item)
+def find_best_link(product_name, context, search_type=None, num_results=1):
+    """
+    Finds the best link (Official > Distributor > General)
+    """
+    clean_item = clean_search_term(product_name)
     clean_context = clean_search_term(context)
-    base_query = f"{clean_item} {clean_context}".strip()
     
-    # Strategy 1: Strict PDF Datasheet
-    link = google_search(f"{base_query} datasheet filetype:pdf")
-    if link: return link
+    if search_type == "image":
+        query = f"{clean_item} {clean_context} product photo"
+    else:
+        query = f"{clean_item} {clean_context} datasheet"
+        
+    results = google_search(query, search_type=search_type, num_results=10) # Fetch more to filter
+    
+    if not results:
+        # Fallback for datasheets if strict search fails
+        if not search_type:
+             query = f"{clean_item} {clean_context} specifications"
+             results = google_search(query, num_results=5)
+             if not results: return [] if num_results > 1 else None
 
-    # Strategy 2: Distributor/Manufacturer Sites
-    link = google_search(f"{base_query} datasheet site:mouser.com OR site:digikey.com OR site:ti.com OR site:st.com")
-    if link: return link
-
-    # Strategy 3: General Specs
-    link = google_search(f"{base_query} specifications")
-    if link: return link
-
-    return "Not Found"
+    # Sort/Filter logic
+    official_links = []
+    distributor_links = []
+    general_links = []
+    
+    for res in results:
+        link = res['link']
+        if is_official(link, product_name) or is_official(link, context):
+            official_links.append(link)
+        elif is_trusted_distributor(link):
+            distributor_links.append(link)
+        else:
+            general_links.append(link)
+            
+    # Prioritize: Official -> Distributor -> General
+    all_links = official_links + distributor_links + general_links
+    
+    if num_results == 1:
+        return all_links[0] if all_links else None
+    else:
+        return all_links[:num_results]
 
 def scrape_links(input_csv, output_csv):
     """Main function to scrape links from input CSV."""
     print("=" * 60)
-    print("STEP 1: SCRAPING DATASHEET AND IMAGE LINKS")
+    print("STEP 1: SCRAPING DATASHEET AND IMAGE LINKS (OPTIMIZED)")
     print("=" * 60)
     
     if not os.path.exists(input_csv):
@@ -106,7 +237,7 @@ def scrape_links(input_csv, output_csv):
     df = pd.read_csv(input_csv)
     
     # Initialize new columns
-    df['sku'] = ""
+    if 'sku' not in df.columns: df['sku'] = ""
     df['Datasheet_Links'] = ""
     df['Image_Links'] = ""
     
@@ -116,25 +247,42 @@ def scrape_links(input_csv, output_csv):
     for index in tqdm(range(len(df)), desc="Scraping"):
         row = df.iloc[index]
         
-        product_name = str(row.get('product_name', '')).strip()
+        # Robust column detection
+        product_name = ""
+        context = ""
         
+        if 'product_name' in df.columns:
+            product_name = str(row['product_name'])
+            # Try to find context columns
+            for col in ['Description / Text Details', 'Details', 'description', 'desc', 'initial_stock']:
+                if col in df.columns and col != 'product_name':
+                    context = str(row[col])
+                    break
+        elif 'Part Number / Model' in df.columns:
+            product_name = str(row['Part Number / Model'])
+            context = str(row.get('Description / Text Details', ''))
+        elif 'Part Number / Brand / Specs' in df.columns:
+             product_name = str(row['Part Number / Brand / Specs'])
+             context = str(row.get('Voltage / Type', ''))
+        else:
+             # Fallback: take first column
+             product_name = str(row.iloc[0])
+
         if not product_name or product_name == 'nan' or len(product_name) < 2:
             continue
+            
+        # Generate SKU if missing
+        if not row.get('sku'):
+            df.at[index, 'sku'] = generate_sku(product_name)
         
-        # Generate SKU
-        sku = generate_sku(product_name)
-        df.at[index, 'sku'] = sku
-        
-        # Search for datasheet using product_name with fallback
-        ds_link = google_search(f"{clean_search_term(product_name)} datasheet")
-        if not ds_link:
-            # Fallback: try with "product photo" keyword
-            ds_link = google_search(f"{clean_search_term(product_name)} specifications")
+        # 1. Search for Datasheet (Priority: Official > Distributor)
+        ds_link = find_best_link(product_name, context, search_type=None, num_results=1)
         df.at[index, 'Datasheet_Links'] = ds_link if ds_link else "Not Found"
         
-        # Search for 3 product photos
-        img_links = google_search(f"{clean_search_term(product_name)} product photo", search_type="image", num_results=3)
-        # Join multiple links with | separator
+        # 2. Search for Images (Priority: Official > Distributor)
+        # We fetch up to 3 images to give options
+        img_links = find_best_link(product_name, context, search_type="image", num_results=3)
+        
         if img_links and len(img_links) > 0:
             df.at[index, 'Image_Links'] = " | ".join(img_links)
         else:
