@@ -11,6 +11,7 @@ import re
 import random
 from urllib.parse import urlparse
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 from dotenv import load_dotenv
 from tqdm import tqdm
 
@@ -159,19 +160,36 @@ def is_trusted_distributor(url):
     return False
 
 def google_search(query, search_type=None, num_results=1):
-    """Performs the search and returns list of items."""
-    try:
-        service = build("customsearch", "v1", developerKey=API_KEY)
-        res = service.cse().list(
-            q=query,
-            cx=CSE_ID,
-            searchType=search_type,
-            num=min(num_results, 10)  # API max is 10
-        ).execute()
-        return res.get('items', [])
-    except Exception as e:
-        print(f"Error searching for {query}: {e}")
-        return []
+    """Performs the search and returns list of items with exponential backoff."""
+    max_retries = 5
+    base_delay = 5  # Start with 5 seconds delay if rate limited
+    
+    for attempt in range(max_retries):
+        try:
+            service = build("customsearch", "v1", developerKey=API_KEY)
+            res = service.cse().list(
+                q=query,
+                cx=CSE_ID,
+                searchType=search_type,
+                num=min(num_results, 10)  # API max is 10
+            ).execute()
+            return res.get('items', [])
+            
+        except HttpError as e:
+            if e.resp.status == 429:
+                wait_time = base_delay * (2 ** attempt)
+                print(f"\n⚠️ Rate limit exceeded (429). Retrying in {wait_time}s...")
+                time.sleep(wait_time)
+            else:
+                print(f"\nError searching for {query}: {e}")
+                return []
+                
+        except Exception as e:
+            print(f"\nError searching for {query}: {e}")
+            return []
+            
+    print(f"\n❌ Failed to get results for '{query}' after {max_retries} attempts.")
+    return []
 
 def find_best_link(product_name, context, search_type=None, num_results=1):
     """
@@ -288,7 +306,7 @@ def scrape_links(input_csv, output_csv):
         else:
             df.at[index, 'Image_Links'] = "Not Found"
         
-        time.sleep(0.5)  # Rate limiting
+        time.sleep(1.5)  # Increased rate limiting to avoid 429 errors
     
     # Save output
     print(f"💾 Saving to: {output_csv}")
